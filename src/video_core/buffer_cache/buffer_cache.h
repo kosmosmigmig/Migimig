@@ -17,6 +17,7 @@
 #include <vector>
 #include <fmt/ranges.h>
 
+#include "common/game_presets.h"
 #include "common/range_sets.inc"
 #include "video_core/buffer_cache/buffer_cache_base.h"
 #include "video_core/buffer_cache/multi_range_refresh.h"
@@ -298,6 +299,19 @@ std::optional<VideoCore::RasterizerDownloadArea> BufferCache<P>::GetFlushArea(DA
         }
         return std::nullopt;
     }();
+    // Selevet 8b076b1 marks even clean CPU-read pages for subsequent fence downloads.
+    // Limit this comparison to MKW; Zelda keeps its on-demand readback contract.
+    static const bool mkw_preflush = [] {
+        const char* value = std::getenv("EDEN_NX2_MKW_SELEVET_PREFLUSH");
+        return value == nullptr || value[0] != '0';
+    }();
+    if (program_id == Settings::MarioKartWorldProgramId &&
+        Tegra::g_nx2_ampere.load(std::memory_order_relaxed) && mkw_preflush &&
+        forced_preflush.value_or(true)) {
+        memory_tracker.MarkRegionAsPreflushable(
+            device_addr_start_aligned, device_addr_end_aligned - device_addr_start_aligned);
+        return area;
+    }
     const bool preflush =
         forced_preflush.value_or(!Tegra::g_nx2_ampere.load(std::memory_order_relaxed));
     if (!area->preemtive) {
