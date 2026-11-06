@@ -3401,6 +3401,7 @@ private:
     FrontState& Front(Core::System& system, VideoCommon::GpuSplit& split);
     void FrontWrite(VideoCommon::GpuSplit& split, FrontState& state, u32 method, u32 argument,
                     bool is_last_call, bool from_macro);
+    bool FrontIssueReport(FrontState& state, u32 query_word);
     void FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split, FrontState& state);
 public:
     /// Split front: whether the 3D macro `method`, called with `count` parameters that GPU work

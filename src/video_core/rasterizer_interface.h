@@ -144,6 +144,9 @@ public:
                                                 [[maybe_unused]] u64 size) {
         return true;
     }
+    /// Submits the work recorded so far with a fence behind the report writes still pending, so
+    /// they finish without waiting for the next submission. Called on the split's back.
+    virtual void SubmitQueryWork() {}
 
     /// Notify rasterizer that any caches of the specified region should be invalidated
     virtual void InvalidateRegion(DAddr addr, u64 size,

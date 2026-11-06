@@ -1811,6 +1811,11 @@ bool RasterizerVulkan::HasCachedReports(DAddr addr, u64 size) {
     return query_cache.HasCachedReports(addr, size);
 }
 
+void RasterizerVulkan::SubmitQueryWork() {
+    fence_manager.SignalReference();
+    scheduler.Flush();
+}
+
 VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64 size) {
     {
         std::scoped_lock lock{texture_cache.mutex};

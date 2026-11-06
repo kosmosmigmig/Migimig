@@ -50,6 +50,10 @@ void Pause() {
 
 } // Anonymous namespace
 
+void GpuSplit::SpinPause() {
+    Pause();
+}
+
 void GpuSplit::CheckOwner(const char* where) {
 #ifdef _WIN32
     // Also while the back is idle: its idle hook submits (Scheduler::FlushDeferred).
