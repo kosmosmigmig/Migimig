@@ -1665,6 +1665,11 @@ bool RasterizerVulkan::HasPendingQueries(DAddr addr, u64 size) {
     return query_cache.IsRegionGpuModified(addr, size);
 }
 
+void RasterizerVulkan::SubmitQueryWork() {
+    fence_manager.SignalReference();
+    scheduler.Flush();
+}
+
 VideoCore::RasterizerDownloadArea RasterizerVulkan::GetFlushArea(DAddr addr, u64 size) {
     std::optional<VideoCore::RasterizerDownloadArea> texture_area;
     {
