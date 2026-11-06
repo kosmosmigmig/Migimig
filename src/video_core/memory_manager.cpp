@@ -166,7 +166,8 @@ GPUVAddr MemoryManager::PageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr de
     }
     {
         std::unique_lock<std::mutex> lock(changes_guard);
-        RecordMapChange(gpu_addr, size);
+        RecordMapChange(gpu_addr & ~page_mask,
+                        Common::AlignUp((gpu_addr & page_mask) + size, page_size));
     }
     return gpu_addr;
 }
@@ -228,7 +229,9 @@ GPUVAddr MemoryManager::BigPageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr
     }
     {
         std::unique_lock<std::mutex> lock(changes_guard);
-        RecordMapChange(gpu_addr, size);
+        // Unmap can touch a big-page entry for a smaller subrange: invalidate the whole entry.
+        RecordMapChange(gpu_addr & ~big_page_mask,
+                        Common::AlignUp((gpu_addr & big_page_mask) + size, big_page_size));
     }
     return gpu_addr;
 }
