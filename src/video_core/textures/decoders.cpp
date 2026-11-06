@@ -63,6 +63,50 @@ void SwizzleImpl(std::span<u8> output, std::span<const u8> input, u32 width, u32
     const u32 block_depth_mask = (1U << block_depth) - 1;
     const u32 x_shift = GOB_SIZE_SHIFT + block_height + block_depth;
 
+    if constexpr (!TO_LINEAR && BYTES_PER_PIXEL == 16) {
+        // Streamed textures land here, and walking them line by line came back to each 512-byte
+        // GOB eight times with the address worked out per pixel: 36% of the GPU back thread's
+        // time (with its helpers) while moving in Ocarina of Time. One GOB at a time reads it in
+        // order, from a table of where its 32 16-byte pieces go.
+        if (depth == 1) {
+            struct Piece {
+                u16 source;
+                u8 x;
+                u8 y;
+            };
+            std::array<Piece, 32> pieces{};
+            for (u32 y = 0; y < GOB_SIZE_Y; ++y) {
+                for (u32 x = 0; x < 4; ++x) {
+                    const u32 offset = pdep<SWIZZLE_X_BITS>(x * 16) | pdep<SWIZZLE_Y_BITS>(y);
+                    pieces[y * 4 + x] = {static_cast<u16>(NativeGobOffset(offset, native_tiling)),
+                                         static_cast<u8>(x), static_cast<u8>(y)};
+                }
+            }
+            {
+                const u32 first = 0, last = height;
+                for (u32 y0 = first; y0 < last; y0 += GOB_SIZE_Y) {
+                    const u32 block_y = y0 >> GOB_SIZE_Y_SHIFT;
+                    const u32 offset_y = (block_y >> block_height) * block_size +
+                                         ((block_y & block_height_mask) << GOB_SIZE_SHIFT);
+                    const bool full_rows = y0 + GOB_SIZE_Y <= height;
+                    for (u32 gob_x = 0; gob_x * 4 < width; ++gob_x) {
+                        const u8* const gob = input.data() + offset_y + (gob_x << x_shift);
+                        u8* const row = output.data() + size_t{y0} * pitch + size_t{gob_x} * 64;
+                        const bool full_columns = gob_x * 4 + 4 <= width;
+                        for (const Piece& piece : pieces) {
+                            if ((full_rows && full_columns) ||
+                                (y0 + piece.y < height && gob_x * 4 + piece.x < width)) {
+                                std::memcpy(row + size_t{piece.y} * pitch + size_t{piece.x} * 16,
+                                            gob + piece.source, 16);
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+    }
+
     for (u32 slice = 0; slice < depth; ++slice) {
         const u32 z = slice + origin_z;
         const u32 offset_z = (z >> block_depth) * slice_size +
