@@ -391,6 +391,20 @@ Tegra::Texture::TICEntry GenericEnvironment::ReadTextureInfo(GPUVAddr tic_addr, 
     const auto handle{Tegra::Texture::TexturePair(raw, via_header_index)};
     const u32 index{Tegra::Texture::TextureHeaderIndex(handle.first, tic_limit,
                                                        gpu_memory->UsesNativeTiling())};
+    if (index > tic_limit) {
+        static std::atomic<u32> invalid_traces{};
+        if (invalid_traces.fetch_add(1, std::memory_order_relaxed) < 32) {
+            LOG_ERROR(HW_GPU,
+                      "Cave invalid TIC: program={:#x} stage={} raw={:#x} index={} limit={} "
+                      "pool={:#x} via_header={} native={}",
+                      program_base, static_cast<u32>(stage), raw, index, tic_limit, tic_addr,
+                      via_header_index, gpu_memory->UsesNativeTiling());
+            for (const auto& [key, value] : cbuf_values) {
+                LOG_ERROR(HW_GPU, "Cave TIC cbuf: bank={} offset={:#x} value={:#x}",
+                          static_cast<u32>(key >> 32), static_cast<u32>(key), value);
+            }
+        }
+    }
     ASSERT(index <= tic_limit);
     const GPUVAddr descriptor_addr{tic_addr + index * sizeof(Tegra::Texture::TICEntry)};
     Tegra::Texture::TICEntry entry;
