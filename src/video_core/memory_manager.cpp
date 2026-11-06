@@ -164,7 +164,10 @@ GPUVAddr MemoryManager::PageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr de
     if (VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::Bounds)) {
         UpdateContinuousRuns(gpu_addr, size);
     }
-    map_serial.fetch_add(1, std::memory_order_release);
+    {
+        std::unique_lock<std::mutex> lock(changes_guard);
+        RecordMapChange(gpu_addr, size);
+    }
     return gpu_addr;
 }
 
@@ -223,7 +226,10 @@ GPUVAddr MemoryManager::BigPageTableOp(GPUVAddr gpu_addr, [[maybe_unused]] DAddr
     if (VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::Bounds)) {
         UpdateContinuousRuns(gpu_addr, size);
     }
-    map_serial.fetch_add(1, std::memory_order_release);
+    {
+        std::unique_lock<std::mutex> lock(changes_guard);
+        RecordMapChange(gpu_addr, size);
+    }
     return gpu_addr;
 }
 
@@ -722,13 +728,48 @@ size_t MemoryManager::MaxContinuousRange(GPUVAddr gpu_addr, size_t size) const {
     thread_local std::array<Entry, 1024> cache{};
     const u64 serial = map_serial.load(std::memory_order_acquire);
     Entry& entry = cache[(gpu_addr * 0x9E3779B97F4A7C15ULL) >> 54];
-    if (entry.owner == unique_identifier + 1 && entry.gpu_addr == gpu_addr &&
-        entry.serial == serial && size <= entry.size) {
-        return (std::min)(entry.result, size);
+    if (entry.owner == unique_identifier + 1 && entry.gpu_addr == gpu_addr && size <= entry.size) {
+        if (entry.serial == serial) {
+            return (std::min)(entry.result, size);
+        }
+        // The table changed since: the answer stands if none of the changes touched the range
+        // it was worked out for. EDEN_NX2_RANGE_SELECTIVE=0 turns this off (A/B and fallback).
+        static const bool selective = [] {
+            const char* value = std::getenv("EDEN_NX2_RANGE_SELECTIVE");
+            return value == nullptr || value[0] != '0';
+        }();
+        if (selective && RangeUnchangedSince(entry.serial, serial, gpu_addr, entry.size)) {
+            entry.serial = serial;
+            return (std::min)(entry.result, size);
+        }
     }
     const size_t result = MaxContinuousRangeUncached(gpu_addr, size);
     entry = {unique_identifier + 1, gpu_addr, size, serial, result};
     return result;
+}
+
+void MemoryManager::RecordMapChange(GPUVAddr gpu_addr, u64 size) {
+    // `changes_guard` is held: the slot is written before the serial that publishes it.
+    const u64 serial = map_serial.load(std::memory_order_relaxed) + 1;
+    map_changes[serial % map_change_ring] = {serial, gpu_addr, size};
+    map_serial.store(serial, std::memory_order_release);
+}
+
+bool MemoryManager::RangeUnchangedSince(u64 since, u64 now, GPUVAddr gpu_addr, u64 size) const {
+    if (now - since > map_change_ring) {
+        return false; // older changes were overwritten: unknown
+    }
+    std::unique_lock<std::mutex> lock(changes_guard);
+    for (u64 s = since + 1; s <= now; ++s) {
+        const MapChange& change = map_changes[s % map_change_ring];
+        if (change.serial != s) {
+            return false; // slot reused by a newer change: unknown
+        }
+        if (change.gpu_addr < gpu_addr + size && gpu_addr < change.gpu_addr + change.size) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void MemoryManager::UpdateContinuousRuns(GPUVAddr gpu_addr, size_t size) {

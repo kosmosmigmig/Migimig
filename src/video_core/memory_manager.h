@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <map>
 #include <memory>
@@ -298,6 +299,21 @@ private:
     mutable std::mutex guard;
     /// Bumped after each page table change; readers keep their MappingSnapshot until then.
     std::atomic<u64> map_serial{};
+    /// The last page table changes, by serial (written under `changes_guard`): a MaxContinuousRange
+    /// answer whose range none of them touches stays valid across them. Games map and unmap
+    /// several times a frame, which otherwise dropped every cached answer once per frame.
+    struct MapChange {
+        u64 serial;
+        GPUVAddr gpu_addr;
+        u64 size;
+    };
+    static constexpr size_t map_change_ring = 256;
+    std::array<MapChange, map_change_ring> map_changes{};
+    mutable std::mutex changes_guard; ///< Guards map_changes and the bump that publishes them
+    /// Records a change and bumps map_serial. Called with `changes_guard` held.
+    void RecordMapChange(GPUVAddr gpu_addr, u64 size);
+    /// True when no change recorded after `since` (up to `now`) overlaps [gpu_addr, gpu_addr+size).
+    bool RangeUnchangedSince(u64 since, u64 now, GPUVAddr gpu_addr, u64 size) const;
 
     struct ContinuousRun {
         GPUVAddr end;
