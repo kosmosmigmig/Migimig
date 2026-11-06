@@ -774,3 +774,7 @@ if (YUZU_INSTALL_UDEV_RULES)
     install(FILES "dist/72-eden-input.rules"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/udev/rules.d")
 endif()
+
+add_executable(codex_batch_check EXCLUDE_FROM_ALL tools/codex_batch_check.cpp)
+target_link_libraries(codex_batch_check PRIVATE dynarmic common)
+target_include_directories(codex_batch_check PRIVATE src src/dynarmic src/dynarmic/src)
